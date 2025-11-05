@@ -13,13 +13,13 @@ typedef struct {
     int stop_flag;
 } ClientContext;
 
-unsigned long socket_to_console_thread(void* param) {
+DWORD WINAPI socket_to_console_thread(LPVOID param) {
     ClientContext* context = (ClientContext*)param;
     char buffer[BUFFER_SIZE];
-    unsigned long bytes_written;
+    DWORD bytes_written;
     HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
     
-    printf("Network->Console thread started\n");
+    printf("Network to console thread started\n");
     
     while (!context->stop_flag) {
         int bytes_read = recv(context->socket, buffer, sizeof(buffer)-1, 0);
@@ -30,9 +30,7 @@ unsigned long socket_to_console_thread(void* param) {
             printf("\nServer disconnected\n");
             break;
         } else {
-            if (WSAGetLastError() != WSAEWOULDBLOCK) {
-                break;
-            }
+            if (WSAGetLastError() != WSAEWOULDBLOCK) break;
             Sleep(10);
         }
     }
@@ -41,14 +39,13 @@ unsigned long socket_to_console_thread(void* param) {
     return 0;
 }
 
-unsigned long console_to_socket_thread(void* param) {
+DWORD WINAPI console_to_socket_thread(LPVOID param) {
     ClientContext* context = (ClientContext*)param;
     char buffer[BUFFER_SIZE];
-    unsigned long bytes_read;
+    DWORD bytes_read;
     HANDLE stdin_handle = GetStdHandle(STD_INPUT_HANDLE);
     
-    printf("Console->Network thread started\n");
-    printf("Connected! Type commands:\n");
+    printf("Console to network thread started\n");
     
     while (!context->stop_flag) {
         if (ReadFile(stdin_handle, buffer, sizeof(buffer)-1, &bytes_read, NULL)) {
@@ -70,21 +67,18 @@ int main(int argc, char* argv[]) {
     struct sockaddr_in server_addr;
     ClientContext context = {0};
     HANDLE threads[2];
-    unsigned long thread_ids[2];
     
     const char* server_ip = "127.0.0.1";
     int port = PORT;
     
-    // Аргументы командной строки
     if (argc > 1) server_ip = argv[1];
     if (argc > 2) port = atoi(argv[2]);
     
     printf("Starting client...\n");
     printf("Connecting to %s:%d...\n", server_ip, port);
     
-    // Инициализация сети
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-        printf("Network init failed\n");
+        printf("WSAStartup failed\n");
         return 1;
     }
     
@@ -104,29 +98,26 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    printf("Connected successfully!\n");
+    printf("Connected to server successfully!\n");
+    printf("Type commands below:\n\n");
     
     context.socket = connect_socket;
     
-    // Неблокирующий режим
-    unsigned long mode = 1;
+    u_long mode = 1;
     ioctlsocket(connect_socket, FIONBIO, &mode);
     
-    // Запускаем потоки
-    threads[0] = CreateThread(NULL, 0, socket_to_console_thread, &context, 0, &thread_ids[0]);
-    threads[1] = CreateThread(NULL, 0, console_to_socket_thread, &context, 0, &thread_ids[1]);
+    threads[0] = CreateThread(NULL, 0, socket_to_console_thread, &context, 0, NULL);
+    threads[1] = CreateThread(NULL, 0, console_to_socket_thread, &context, 0, NULL);
     
     if (!threads[0] || !threads[1]) {
         printf("Thread creation failed\n");
         context.stop_flag = 1;
     }
     
-    // Ожидаем завершения потоков
     WaitForMultipleObjects(2, threads, TRUE, INFINITE);
     
-    printf("Client shutting down\n");
+    printf("\nClient shutting down...\n");
     
-    // Очистка
     context.stop_flag = 1;
     shutdown(connect_socket, 2);
     closesocket(connect_socket);
